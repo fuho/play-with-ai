@@ -3,6 +3,10 @@ Create a game using pygame, it should combine elements of Tetris and Arkanoid.
 """
 import pygame
 import random
+import logging
+
+# Setup logging to debug settling
+logging.basicConfig(level=logging.DEBUG)
 
 # Colors
 BLACK = (0, 0, 0)
@@ -12,7 +16,7 @@ RED = (255, 0, 0)
 # Screen setup
 SIZE = (400, 600)
 screen = pygame.display.set_mode(SIZE)
-pygame.display.set_caption("Tetris Breaker v7")
+pygame.display.set_caption("Tetris Breaker v8")
 
 # Tetris tetrominoes
 TETROMINOES = {
@@ -29,13 +33,14 @@ class Tetromino:
     def __init__(self, x, y, shape_key):
         self.shape_key = shape_key
         self.rects = [pygame.Rect(x + dx, y + dy, 25, 25) for dx, dy in TETROMINOES[shape_key]]
-        self.speed = -0.5  # Upward movement
+        self.speed = -0.5
         self.settled = False
 
     def update(self, settled_tetrominoes):
         if not self.settled:
             for rect in self.rects:
                 rect.y += self.speed
+            # Check collisions
             for tet in settled_tetrominoes:
                 for s_rect in tet.rects:
                     for rect in self.rects:
@@ -43,19 +48,21 @@ class Tetromino:
                             self.settled = True
                             for r in self.rects:
                                 r.bottom = s_rect.top
+                            logging.debug(f"Settled due to collision at {s_rect.top}")
                             return
+            # Check top
             if any(rect.top <= 0 for rect in self.rects):
                 self.settled = True
                 for rect in self.rects:
                     if rect.top < 0:
                         rect.top = 0
+                logging.debug("Settled at top")
 
     def align_to_paddle(self, paddle_x):
         if not self.settled:
             paddle_center = paddle_x + 50
             self_center = sum(r.centerx for r in self.rects) / len(self.rects)
             dx = paddle_center - self_center
-            # Snap to 25px grid
             target_x = round((paddle_center - dx) / 25) * 25
             move_x = target_x - self_center
             for rect in self.rects:
@@ -81,8 +88,13 @@ class Tetromino:
 
     def drop(self, settled_tetrominoes):
         if not self.settled:
-            while not self.settled:
+            for _ in range(1000):  # Limit to prevent infinite loop
                 self.update(settled_tetrominoes)
+                if self.settled:
+                    break
+            else:
+                logging.error("Drop failed to settle after 1000 steps")
+                self.settled = True  # Force settle to avoid crash
 
     def draw(self, screen):
         for rect in self.rects:
@@ -125,18 +137,16 @@ class Paddle:
         self.speed = 5
 
     def update(self, keys, mouse_pos):
-        # Key control
         if keys[pygame.K_LEFT]:
             self.rect.x -= self.speed
         if keys[pygame.K_RIGHT]:
             self.rect.x += self.speed
-        # Mouse control
         mouse_dx = mouse_pos[0] - self.rect.centerx
         if abs(mouse_dx) > 5:
             self.rect.centerx = mouse_pos[0]
         self.rect.clamp_ip(screen.get_rect())
 
-    def draw(self, screen):  # Added back the missing draw method
+    def draw(self, screen):
         pygame.draw.rect(screen, WHITE, self.rect)
 
 class Game:
@@ -150,20 +160,24 @@ class Game:
         self.score = 0
         self.font = pygame.font.Font(None, 36)
         self.game_over = False
+        self.last_click = 0  # For debouncing
         self.bounce_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\x00\x80\x00\x00\x00\x80\x00' * 10))
         self.break_sound = pygame.mixer.Sound(pygame.mixer.Sound(buffer=b'\x00\xFF\x00\x80' * 5))
         self.bounce_sound.set_volume(0.5)
         self.break_sound.set_volume(0.5)
 
     def handle_events(self):
+        current_time = pygame.time.get_ticks()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
-            if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.type == pygame.MOUSEBUTTONDOWN and current_time - self.last_click > 200:  # 200ms debounce
                 if event.button == 1:  # Left click = drop
                     self.tetrominoes[-1].drop([t for t in self.tetrominoes if t.settled])
+                    self.last_click = current_time
                 elif event.button == 3:  # Right click = rotate
                     self.tetrominoes[-1].rotate()
+                    self.last_click = current_time
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
             self.tetrominoes[-1].rotate()
@@ -190,7 +204,6 @@ class Game:
             self.game_over = True
             return False
 
-        # Update tetrominoes
         settled_tets = [t for t in self.tetrominoes if t.settled]
         active_tet = self.tetrominoes[-1]
         active_tet.update(settled_tets)
@@ -198,7 +211,6 @@ class Game:
         if active_tet.settled:
             self.tetrominoes.append(Tetromino(175, 525, random.choice(list(TETROMINOES.keys()))))
 
-        # Ball hits settled tetrominoes
         for tet in settled_tets:
             if tet.hit(self.ball.rect):
                 self.score += 10
@@ -207,14 +219,13 @@ class Game:
                 if not tet.rects:
                     self.tetrominoes.remove(tet)
 
-        # Line clearing
         y_levels = {}
         for tet in settled_tets:
             for rect in tet.rects:
                 y = rect.y
                 y_levels[y] = y_levels.get(y, 0) + 1
         for y, count in y_levels.items():
-            if count >= 16:  # Full line (400px / 25px = 16 blocks)
+            if count >= 16:
                 self.score += 100
                 for tet in settled_tets[:]:
                     tet.rects = [r for r in tet.rects if r.y != y]

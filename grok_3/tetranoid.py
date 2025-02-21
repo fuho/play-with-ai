@@ -12,7 +12,7 @@ RED = (255, 0, 0)
 # Screen setup
 SIZE = (400, 600)
 screen = pygame.display.set_mode(SIZE)
-pygame.display.set_caption("Tetris Breaker v6")
+pygame.display.set_caption("Tetris Breaker v7")
 
 # Tetris tetrominoes
 TETROMINOES = {
@@ -36,7 +36,6 @@ class Tetromino:
         if not self.settled:
             for rect in self.rects:
                 rect.y += self.speed
-            # Check for stacking or top
             for tet in settled_tetrominoes:
                 for s_rect in tet.rects:
                     for rect in self.rects:
@@ -56,8 +55,11 @@ class Tetromino:
             paddle_center = paddle_x + 50
             self_center = sum(r.centerx for r in self.rects) / len(self.rects)
             dx = paddle_center - self_center
+            # Snap to 25px grid
+            target_x = round((paddle_center - dx) / 25) * 25
+            move_x = target_x - self_center
             for rect in self.rects:
-                rect.x += dx
+                rect.x += move_x
                 rect.clamp_ip(screen.get_rect())
 
     def rotate(self):
@@ -69,7 +71,7 @@ class Tetromino:
         for rect in self.rects:
             dx = rect.centerx - cx
             dy = rect.centery - cy
-            new_dx = -dy  # 90-degree clockwise
+            new_dx = -dy
             new_dy = dx
             new_rect = pygame.Rect(0, 0, 25, 25)
             new_rect.center = (cx + new_dx, cy + new_dy)
@@ -77,12 +79,10 @@ class Tetromino:
             new_rects.append(new_rect)
         self.rects = new_rects
 
-    def drop(self):
+    def drop(self, settled_tetrominoes):
         if not self.settled:
-            self.settled = True
-            lowest_y = min(r.bottom for r in self.rects)
-            for rect in self.rects:
-                rect.y -= (lowest_y - 25)  # Snap to top-ish
+            while not self.settled:
+                self.update(settled_tetrominoes)
 
     def draw(self, screen):
         for rect in self.rects:
@@ -130,14 +130,11 @@ class Paddle:
             self.rect.x -= self.speed
         if keys[pygame.K_RIGHT]:
             self.rect.x += self.speed
-        # Mouse control (only if moved significantly)
+        # Mouse control
         mouse_dx = mouse_pos[0] - self.rect.centerx
-        if abs(mouse_dx) > 5:  # Threshold to avoid conflict
+        if abs(mouse_dx) > 5:
             self.rect.centerx = mouse_pos[0]
         self.rect.clamp_ip(screen.get_rect())
-
-    def draw(self, screen):
-        pygame.draw.rect(screen, WHITE, self.rect)
 
 class Game:
     def __init__(self):
@@ -160,15 +157,15 @@ class Game:
             if event.type == pygame.QUIT:
                 return False
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:
+                if event.button == 1:  # Left click = drop
+                    self.tetrominoes[-1].drop([t for t in self.tetrominoes if t.settled])
+                elif event.button == 3:  # Right click = rotate
                     self.tetrominoes[-1].rotate()
-                elif event.button == 3:
-                    self.tetrominoes[-1].drop()
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
             self.tetrominoes[-1].rotate()
         if keys[pygame.K_UP]:
-            self.tetrominoes[-1].drop()
+            self.tetrominoes[-1].drop([t for t in self.tetrominoes if t.settled])
         return True
 
     def update(self):
@@ -190,11 +187,11 @@ class Game:
             self.game_over = True
             return False
 
-        # Update all tetrominoes
+        # Update tetrominoes
         settled_tets = [t for t in self.tetrominoes if t.settled]
         active_tet = self.tetrominoes[-1]
-        active_tet.update(settled_tets)  # Pass settled ones for stacking
-        active_tet.align_to_paddle(self.paddle.rect.x)  # Only align x
+        active_tet.update(settled_tets)
+        active_tet.align_to_paddle(self.paddle.rect.x)
         if active_tet.settled:
             self.tetrominoes.append(Tetromino(175, 525, random.choice(list(TETROMINOES.keys()))))
 
@@ -206,6 +203,20 @@ class Game:
                 pygame.mixer.Sound.play(self.break_sound)
                 if not tet.rects:
                     self.tetrominoes.remove(tet)
+
+        # Line clearing
+        y_levels = {}
+        for tet in settled_tets:
+            for rect in tet.rects:
+                y = rect.y
+                y_levels[y] = y_levels.get(y, 0) + 1
+        for y, count in y_levels.items():
+            if count >= 16:  # Full line (400px / 25px = 16 blocks)
+                self.score += 100  # Bonus for line clear
+                for tet in settled_tets[:]:
+                    tet.rects = [r for r in tet.rects if r.y != y]
+                    if not tet.rects:
+                        self.tetrominoes.remove(tet)
 
         if any(any(r.bottom >= 550 for r in tet.rects) for tet in settled_tets):
             self.game_over = True

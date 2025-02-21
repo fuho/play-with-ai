@@ -1,0 +1,6 @@
+ipython
+ollama
+py5[extras]
+pandas
+python-fasthtml
+anthropic

@@ -1,0 +1,1 @@
+{"language":"en","agent":"CodeActAgent","max_iterations":null,"security_analyzer":null,"confirmation_mode":false,"llm_model":"anthropic/claude-3-5-sonnet-20241022","llm_api_key":"docker.all-hands.dev/all-hands-ai/runtime","llm_base_url":null,"remote_runtime_resource_factor":1,"github_token":null,"enable_default_condenser":false,"user_consents_to_analytics":false}

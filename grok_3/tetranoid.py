@@ -136,6 +136,9 @@ class Paddle:
             self.rect.centerx = mouse_pos[0]
         self.rect.clamp_ip(screen.get_rect())
 
+    def draw(self, screen):  # Added back the missing draw method
+        pygame.draw.rect(screen, WHITE, self.rect)
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -212,7 +215,7 @@ class Game:
                 y_levels[y] = y_levels.get(y, 0) + 1
         for y, count in y_levels.items():
             if count >= 16:  # Full line (400px / 25px = 16 blocks)
-                self.score += 100  # Bonus for line clear
+                self.score += 100
                 for tet in settled_tets[:]:
                     tet.rects = [r for r in tet.rects if r.y != y]
                     if not tet.rects:

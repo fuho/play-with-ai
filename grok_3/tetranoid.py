@@ -12,23 +12,36 @@ RED = (255, 0, 0)
 # Screen setup
 SIZE = (700, 500)
 screen = pygame.display.set_mode(SIZE)
-pygame.display.set_caption("Tetris Breaker")
+pygame.display.set_caption("Tetris Breaker v2")
 
-# Classes
+# Tetris-like shapes (list of (x, y) offsets from center)
+SHAPES = [
+    [(0, 0), (0, -25), (0, 25), (50, 25)],  # L-shape
+    [(0, 0), (0, -25), (-50, 0), (50, 0)],  # T-shape
+    [(0, 0), (0, -25), (25, 0), (25, -25)]  # Square
+]
+
 class Block:
     def __init__(self, x, y):
-        self.rect = pygame.Rect(x, y, 50, 25)
-        self.speed = 1  # Falling speed
+        self.shape = random.choice(SHAPES)
+        self.rects = [pygame.Rect(x + dx, y + dy, 25, 25) for dx, dy in self.shape]
+        self.speed = 0.5  # Slower fall
+        self.landed = False
 
     def update(self):
-        self.rect.y += self.speed
+        if not self.landed:
+            for rect in self.rects:
+                rect.y += self.speed
+            if any(rect.bottom >= SIZE[1] for rect in self.rects):
+                self.landed = True
 
     def draw(self, screen):
-        pygame.draw.rect(screen, WHITE, self.rect)
+        for rect in self.rects:
+            pygame.draw.rect(screen, WHITE, rect)
 
 class Ball:
     def __init__(self):
-        self.rect = pygame.Rect(350, 400, 10, 10)  # Start above paddle
+        self.rect = pygame.Rect(350, 400, 10, 10)
         self.speed_x = random.choice([-2, 2])
         self.speed_y = -3
 
@@ -42,11 +55,16 @@ class Ball:
 class Paddle:
     def __init__(self):
         self.rect = pygame.Rect(300, 450, 100, 10)
+        self.speed = 10
 
     def update(self):
         pos = pygame.mouse.get_pos()
-        self.rect.x = pos[0] - 50  # Center paddle on mouse
-        self.rect.clamp_ip(screen.get_rect())  # Keep paddle on screen
+        target_x = pos[0] - 50
+        if abs(self.rect.centerx - target_x) > self.speed:
+            self.rect.x += self.speed if target_x > self.rect.x else -self.speed
+        else:
+            self.rect.x = target_x
+        self.rect.clamp_ip(screen.get_rect())
 
     def draw(self, screen):
         pygame.draw.rect(screen, WHITE, self.rect)
@@ -55,11 +73,12 @@ class Game:
     def __init__(self):
         pygame.init()
         self.clock = pygame.time.Clock()
-        self.blocks = [Block(random.randint(0, 13) * 50, -25) for _ in range(5)]  # Start with 5 blocks
+        self.blocks = [Block(random.randint(0, 12) * 50, -50) for _ in range(3)]  # Fewer blocks
         self.ball = Ball()
         self.paddle = Paddle()
         self.score = 0
         self.font = pygame.font.Font(None, 36)
+        self.game_over = False
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -68,43 +87,42 @@ class Game:
         return True
 
     def update(self):
-        # Update paddle
-        self.paddle.update()
+        if self.game_over:
+            return False
 
-        # Update ball
+        self.paddle.update()
         self.ball.update()
-        # Bounce off walls
+
+        # Ball physics
         if self.ball.rect.left <= 0 or self.ball.rect.right >= SIZE[0]:
             self.ball.speed_x *= -1
         if self.ball.rect.top <= 0:
             self.ball.speed_y *= -1
-        # Bounce off paddle
         if self.ball.rect.colliderect(self.paddle.rect):
-            self.ball.speed_y = -abs(self.ball.speed_y)  # Ensure upward bounce
-            # Adjust angle based on hit position
+            self.ball.speed_y = -abs(self.ball.speed_y)
             hit_pos = (self.ball.rect.centerx - self.paddle.rect.centerx) / 50
             self.ball.speed_x = hit_pos * 3
 
-        # Ball falls off bottom
         if self.ball.rect.top > SIZE[1]:
+            self.game_over = True
             return False
 
-        # Update blocks
+        # Block updates
         for block in self.blocks[:]:
             block.update()
-            # Ball hits block
-            if self.ball.rect.colliderect(block.rect):
-                self.blocks.remove(block)
-                self.score += 10
-                self.ball.speed_y *= -1
-                break
-            # Block hits bottom
-            if block.rect.top > SIZE[1]:
+            if not block.landed:
+                for rect in block.rects:
+                    if self.ball.rect.colliderect(rect):
+                        self.blocks.remove(block)
+                        self.score += 10
+                        self.ball.speed_y *= -1
+                        break
+            elif any(rect.bottom >= SIZE[1] - 50 for rect in block.rects):  # Stack limit
+                self.game_over = True
                 return False
 
-        # Spawn new blocks
-        if random.random() < 0.02:  # ~1 block every 50 frames
-            self.blocks.append(Block(random.randint(0, 13) * 50, -25))
+        if random.random() < 0.005:  # Slower spawn
+            self.blocks.append(Block(random.randint(0, 12) * 50, -50))
 
         return True
 
@@ -114,9 +132,11 @@ class Game:
             block.draw(screen)
         self.ball.draw(screen)
         self.paddle.draw(screen)
-        # Draw score
         score_text = self.font.render(f"Score: {self.score}", True, WHITE)
         screen.blit(score_text, (10, 10))
+        if self.game_over:
+            game_over_text = self.font.render(f"Game Over! Score: {self.score}", True, WHITE)
+            screen.blit(game_over_text, (SIZE[0]//2 - 100, SIZE[1]//2))
 
 def main():
     game = Game()
@@ -124,8 +144,7 @@ def main():
     while running:
         running = game.handle_events()
         if not game.update():
-            print(f"Game Over! Final Score: {game.score}")
-            running = False
+            running = False if game.game_over else True
         game.draw(screen)
         pygame.display.flip()
         game.clock.tick(60)

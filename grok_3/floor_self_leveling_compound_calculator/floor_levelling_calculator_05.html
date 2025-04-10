@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Floor Leveling Calculator</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+    canvas { border: 1px solid #ccc; }
+    #measurements-container { margin-top: 20px; }
+    #json-display { margin-top: 20px; background: #f5f5f5; padding: 10px; border: 1px solid #ddd; }
+    #import-text { width: 100%; height: 100px; margin-top: 10px; }
+    button { margin: 5px; }
+    #cursor-coords { position: absolute; background: #fff; border: 1px solid #ccc; padding: 2px 5px; pointer-events: none; display: none; }
+    #area-volume-display { margin-top: 10px; font-weight: bold; }
+    #height-input { position: absolute; width: 80px; padding: 2px; display: none; }
+    .highlight-selected { stroke: yellow; stroke-width: 3px; }
+    .highlight-closest { stroke: orange; stroke-width: 2px; }
+  </style>
+</head>
+<body>
+<h1>Floor Leveling Volume Calculator</h1>
+<div>
+  <label>Grid Spacing (mm): <input type="number" id="grid-spacing" value="100" min="10" step="10"></label>
+  <button id="reset-grid">Reset Grid</button>
+</div>
+<div>
+  <label><input type="radio" name="mode" value="origin" checked> Select Origin</label>
+  <label><input type="radio" name="mode" value="outline"> Draw Outline</label>
+  <label><input type="radio" name="mode" value="measurements"> Select Measurements</label>
+</div>
+<div>
+  <label>Visualization:
+    <select id="visualization-mode">
+      <option value="none">None</option>
+      <option value="height-map">Height Map</option>
+      <option value="topographic">Topographic Map</option>
+    </select>
+  </label>
+</div>
+<canvas id="grid-canvas" width="600" height="600"></canvas>
+<div id="area-volume-display">Room Area: 0 m² | Volume Needed: 0 m³</div>
+<div id="measurements-container"></div>
+<pre id="json-display">{}</pre>
+<div>
+  <button id="copy-json">Copy JSON to Clipboard</button>
+  <button id="import-json">Import JSON</button>
+  <textarea id="import-text" placeholder="Paste JSON here"></textarea>
+</div>
+<div id="cursor-coords"></div>
+<input type="number" id="height-input" placeholder="Height (mm)">
+
+<script>
+  const canvas = document.getElementById('grid-canvas');
+  const ctx = canvas.getContext('2d');
+  let gridSpacing = parseInt(document.getElementById('grid-spacing').value);
+  const canvasScale = 20; // Pixels per gridSpacing mm
+  let origin = null;
+  let outlinePoints = [];
+  let measurementPoints = [];
+  let outlineClosed = false;
+  let mode = 'origin';
+  let draggingPoint = null;
+  let cursorCoordsDiv = document.getElementById('cursor-coords');
+  let visualizationMode = 'none';
+  let heightInput = document.getElementById('height-input');
+  let selectedPoint = null;
+  let closestPoint = null;
+
+  document.getElementById('grid-spacing').addEventListener('change', () => {
+    gridSpacing = parseInt(document.getElementById('grid-spacing').value);
+    drawCanvas();
+  });
+
+  document.getElementById('reset-grid').addEventListener('click', () => {
+    origin = null;
+    outlinePoints = [];
+    measurementPoints = [];
+    outlineClosed = false;
+    document.getElementById('measurements-container').innerHTML = '';
+    document.getElementById('json-display').innerText = '{}';
+    document.getElementById('area-volume-display').innerText = 'Room Area: 0 m² | Volume Needed: 0 m³';
+    drawCanvas();
+  });
+
+  document.querySelectorAll('input[name="mode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      mode = e.target.value;
+      if (mode === 'outline' && !origin) {
+        alert('Please select the origin first.');
+        document.querySelector('input[value="origin"]').checked = true;
+        mode = 'origin';
+      } else if (mode === 'measurements' && !outlineClosed) {
+        alert('Please close the outline first.');
+        document.querySelector('input[value="outline"]').checked = true;
+        mode = 'outline';
+      }
+    });
+  });
+
+  document.getElementById('visualization-mode').addEventListener('change', (e) => {
+    visualizationMode = e.target.value;
+    drawCanvas();
+  });
+
+  canvas.addEventListener('click', (e) => {
+    const point = getSnappedPoint(e);
+    if (!point) return;
+
+    if (mode === 'origin') {
+      origin = point;
+      drawCanvas();
+    } else if (mode === 'outline' && !outlineClosed) {
+      if (outlinePoints.length > 0 && pointsEqual(point, outlinePoints[0])) {
+        outlineClosed = true;
+      } else if (!outlinePoints.some(p => pointsEqual(p, point))) {
+        outlinePoints.push(point);
+      }
+      drawCanvas();
+      updateAreaAndVolume();
+    } else if (mode === 'measurements' && outlineClosed) {
+      const existingPoint = measurementPoints.find(p => pointsEqual(p, point));
+      if (existingPoint) {
+        selectedPoint = existingPoint;
+        showHeightInput(e, existingPoint);
+      } else {
+        const index = measurementPoints.length;
+        const name = `M${index}`;
+        const newPoint = { ...point, name, height: null };
+        measurementPoints.push(newPoint);
+        addMeasurementInput(name, newPoint);
+        selectedPoint = newPoint;
+        showHeightInput(e, newPoint);
+        drawCanvas();
+        updateJSON();
+        updateAreaAndVolume();
+      }
+    }
+  });
+
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const point = getSnappedPoint(e);
+    if (!point) return;
+
+    const index = measurementPoints.findIndex(p => pointsEqual(p, point));
+    if (index !== -1) {
+      measurementPoints.splice(index, 1);
+      document.getElementById('measurements-container').removeChild(document.getElementById(measurementPoints[index].inputId).parentNode);
+      heightInput.style.display = 'none';
+      drawCanvas();
+      updateJSON();
+      updateAreaAndVolume();
+    }
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (mode !== 'measurements') return;
+    const point = getSnappedPoint(e);
+    if (!point) return;
+    draggingPoint = measurementPoints.find(p => pointsEqual(p, point));
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const physicalX = Math.round((mouseX / canvasScale) * gridSpacing / gridSpacing) * gridSpacing;
+    const physicalY = Math.round((mouseY / canvasScale) * gridSpacing / gridSpacing) * gridSpacing;
+    const snappedPoint = { x: physicalX, y: physicalY };
+
+    if (draggingPoint) {
+      draggingPoint.x = snappedPoint.x;
+      draggingPoint.y = snappedPoint.y;
+      drawCanvas();
+    } else {
+      closestPoint = snappedPoint;
+      drawCanvas();
+      if (mode === 'outline' && outlinePoints.length > 0 && !outlineClosed) {
+        previewLine(outlinePoints[outlinePoints.length - 1], snappedPoint);
+      }
+    }
+
+    if (origin) {
+      const relX = physicalX - origin.x;
+      const relY = physicalY - origin.y;
+      cursorCoordsDiv.innerText = `X: ${relX}mm, Y: ${relY}mm`;
+      cursorCoordsDiv.style.left = `${e.clientX + 10}px`;
+      cursorCoordsDiv.style.top = `${e.clientY + 10}px`;
+      cursorCoordsDiv.style.display = 'block';
+    }
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    draggingPoint = null;
+    updateJSON();
+    updateAreaAndVolume();
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    cursorCoordsDiv.style.display = 'none';
+    closestPoint = null;
+    drawCanvas();
+  });
+
+  function getSnappedPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    const physicalX = Math.round((clickX / canvasScale) * gridSpacing / gridSpacing) * gridSpacing;
+    const physicalY = Math.round((clickY / canvasScale) * gridSpacing / gridSpacing) * gridSpacing;
+    return { x: physicalX, y: physicalY };
+  }
+
+  function pointsEqual(p1, p2) {
+    return p1.x === p2.x && p1.y === p2.y;
+  }
+
+  function addMeasurementInput(name, point) {
+    const container = document.getElementById('measurements-container');
+    const div = document.createElement('div');
+    div.innerHTML = `
+                <label for="${name}">${name} (X: ${point.x - origin.x}mm, Y: ${point.y - origin.y}mm): </label>
+                <input type="number" id="${name}" placeholder="Height (mm)" step="1" value="${point.height || ''}">
+            `;
+    container.appendChild(div);
+    const input = document.getElementById(name);
+    point.inputId = name;
+    input.addEventListener('input', () => {
+      point.height = parseFloat(input.value) || null;
+      updateJSON();
+      updateAreaAndVolume();
+    });
+  }
+
+  function showHeightInput(e, point) {
+    heightInput.style.left = `${e.clientX + 10}px`;
+    heightInput.style.top = `${e.clientY + 10}px`;
+    heightInput.style.display = 'block';
+    heightInput.value = point.height || '';
+    heightInput.focus();
+
+    heightInput.onblur = () => {
+      point.height = parseFloat(heightInput.value) || null;
+      updateJSON();
+      updateAreaAndVolume();
+      heightInput.style.display = 'none';
+    };
+
+    heightInput.onkeydown = (event) => {
+      if (event.key === 'Enter') {
+        point.height = parseFloat(heightInput.value) || null;
+        updateJSON();
+        updateAreaAndVolume();
+        heightInput.style.display = 'none';
+      } else if (event.key === 'Escape') {
+        heightInput.style.display = 'none';
+      }
+    };
+  }
+
+  function updateJSON() {
+    const measurements = measurementPoints.map(p => ({
+      name: p.name,
+      x: p.x - origin.x,
+      y: p.y - origin.y,
+      height: p.height
+    }));
+    const json = {
+      gridSpacing: gridSpacing,
+      origin: { x: origin.x, y: origin.y },
+      outline: outlinePoints.map(p => ({ x: p.x - origin.x, y: p.y - origin.y })),
+      measurements
+    };
+    document.getElementById('json-display').innerText = JSON.stringify(json, null, 2);
+  }
+
+  function updateAreaAndVolume() {
+    let areaText = 'Room Area: 0 m²';
+    let volumeText = 'Volume Needed: 0 m³';
+
+    if (outlinePoints.length >= 3 && outlineClosed) {
+      const areaMm2 = shoelaceArea(outlinePoints);
+      const areaM2 = areaMm2 / 1e6;
+      areaText = `Room Area: ${areaM2.toFixed(2)} m²`;
+
+      const measurements = measurementPoints.filter(p => p.height !== null);
+      if (measurements.length > 0) {
+        const H = Math.max(...measurements.map(m => m.height));
+        const cellArea = (gridSpacing / 1000) ** 2;
+        let totalVolume = 0;
+
+        const minX = Math.min(...outlinePoints.map(p => p.x));
+        const maxX = Math.max(...outlinePoints.map(p => p.x));
+        const minY = Math.min(...outlinePoints.map(p => p.y));
+        const maxY = Math.max(...outlinePoints.map(p => p.y));
+
+        for (let x = minX; x < maxX; x += gridSpacing) {
+          for (let y = minY; y < maxY; y += gridSpacing) {
+            const center = { x: x + gridSpacing / 2, y: y + gridSpacing / 2 };
+            if (isInsidePolygon(center, outlinePoints)) {
+              const heightAtCenter = interpolateHeight(center.x, center.y);
+              if (heightAtCenter !== null) {
+                totalVolume += (H - heightAtCenter) / 1000 * cellArea;
+              }
+            }
+          }
+        }
+        volumeText = `Volume Needed: ${totalVolume.toFixed(3)} m³`;
+      }
+    }
+
+    document.getElementById('area-volume-display').innerText = `${areaText} | ${volumeText}`;
+  }
+
+  function shoelaceArea(points) {
+    let area = 0;
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      area += points[i].x * points[j].y;
+      area -= points[j].x * points[i].y;
+    }
+    return Math.abs(area) / 2;
+  }
+
+  function isInsidePolygon(point, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y)) &&
+              (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function interpolateHeight(x, y) {
+    const measurements = measurementPoints.filter(p => p.height !== null);
+    if (measurements.length === 0) return null;
+
+    const nearest = measurements.reduce((prev, curr) => {
+      const distPrev = (x - prev.x) ** 2 + (y - prev.y) ** 2;
+      const distCurr = (x - curr.x) ** 2 + (y - curr.y) ** 2;
+      return distCurr < distPrev ? curr : prev;
+    });
+    return nearest.height;
+  }
+
+  function drawCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+
+    if (visualizationMode === 'height-map') {
+      drawHeightMap();
+    } else if (visualizationMode === 'topographic') {
+      drawTopographicMap();
+    }
+
+    if (origin) {
+      const [ox, oy] = toCanvasCoords(origin);
+      ctx.fillStyle = 'green';
+      ctx.beginPath();
+      ctx.arc(ox, oy, 5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.fillText('Origin', ox + 10, oy);
+    }
+
+    if (outlinePoints.length > 0) {
+      ctx.beginPath();
+      const [startX, startY] = toCanvasCoords(outlinePoints[0]);
+      ctx.moveTo(startX, startY);
+      for (let i = 1; i < outlinePoints.length; i++) {
+        const [cx, cy] = toCanvasCoords(outlinePoints[i]);
+        ctx.lineTo(cx, cy);
+      }
+      if (outlineClosed) {
+        ctx.lineTo(startX, startY);
+      }
+      ctx.strokeStyle = 'blue';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    for (let point of measurementPoints) {
+      const [cx, cy] = toCanvasCoords(point);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, 2 * Math.PI);
+      ctx.fillStyle = 'red';
+      ctx.fill();
+      ctx.fillText(point.name, cx + 5, cy - 5);
+
+      if (selectedPoint && pointsEqual(point, selectedPoint)) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 6, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'yellow';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+
+    if (mode === 'measurements' && closestPoint) {
+      const [cx, cy] = toCanvasCoords(closestPoint);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'orange';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  function drawHeightMap() {
+    const measurements = measurementPoints.filter(p => p.height !== null);
+    if (measurements.length === 0) return;
+
+    const minHeight = Math.min(...measurements.map(p => p.height));
+    const maxHeight = Math.max(...measurements.map(p => p.height));
+    const range = maxHeight - minHeight;
+
+    for (let x = 0; x < canvas.width; x += canvasScale) {
+      for (let y = 0; y < canvas.height; y += canvasScale) {
+        const physicalX = (x / canvasScale) * gridSpacing;
+        const physicalY = (y / canvasScale) * gridSpacing;
+        const center = { x: physicalX + gridSpacing / 2, y: physicalY + gridSpacing / 2 };
+        if (isInsidePolygon(center, outlinePoints)) {
+          const height = interpolateHeight(physicalX, physicalY);
+          if (height !== null) {
+            const color = heightToColor(height, minHeight, maxHeight);
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, canvasScale, canvasScale);
+          }
+        }
+      }
+    }
+  }
+
+  function drawTopographicMap() {
+    const measurements = measurementPoints.filter(p => p.height !== null);
+    if (measurements.length < 2) return;
+
+    const minHeight = Math.min(...measurements.map(p => p.height));
+    const maxHeight = Math.max(...measurements.map(p => p.height));
+    const contourInterval = 10; // mm
+
+    for (let contourLevel = Math.ceil(minHeight / contourInterval) * contourInterval; contourLevel <= maxHeight; contourLevel += contourInterval) {
+      for (let i = 0; i < measurements.length; i++) {
+        for (let j = i + 1; j < measurements.length; j++) {
+          const p1 = measurements[i];
+          const p2 = measurements[j];
+          if ((p1.height < contourLevel && p2.height >= contourLevel) || (p1.height >= contourLevel && p2.height < contourLevel)) {
+            const ratio = (contourLevel - p1.height) / (p2.height - p1.height);
+            const x = p1.x + ratio * (p2.x - p1.x);
+            const y = p1.y + ratio * (p2.y - p1.y);
+            const [cx, cy] = toCanvasCoords({ x, y });
+            ctx.beginPath();
+            ctx.arc(cx, cy, 1, 0, 2 * Math.PI);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+          }
+        }
+      }
+    }
+  }
+
+  function heightToColor(height, minHeight, maxHeight) {
+    const ratio = (height - minHeight) / (maxHeight - minHeight || 1);
+    const r = Math.floor(255 * ratio);
+    const b = Math.floor(255 * (1 - ratio));
+    return `rgb(${r}, 0, ${b})`;
+  }
+
+  function drawGrid() {
+    const gridSizePx = (gridSpacing / gridSpacing) * canvasScale;
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= canvas.width; x += gridSizePx) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += gridSizePx) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+  }
+
+  function toCanvasCoords(point) {
+    return [(point.x / gridSpacing) * canvasScale, (point.y / gridSpacing) * canvasScale];
+  }
+
+  function previewLine(from, to) {
+    const [fx, fy] = toCanvasCoords(from);
+    const [tx, ty] = toCanvasCoords(to);
+    ctx.beginPath();
+    ctx.moveTo(fx, fy);
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = 'lightblue';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  document.getElementById('copy-json').addEventListener('click', () => {
+    updateJSON();
+    const json = document.getElementById('json-display').innerText;
+    navigator.clipboard.writeText(json).then(() => alert('JSON copied to clipboard!'));
+  });
+
+  document.getElementById('import-json').addEventListener('click', () => {
+    const jsonText = document.getElementById('import-text').value;
+    try {
+      const data = JSON.parse(jsonText);
+      gridSpacing = data.gridSpacing || 100;
+      document.getElementById('grid-spacing').value = gridSpacing; // Update text field
+      origin = data.origin || { x: 0, y: 0 };
+      outlinePoints = data.outline.map(p => ({ x: p.x + origin.x, y: p.y + origin.y }));
+      measurementPoints = data.measurements.map((m, index) => {
+        const name = m.name || `M${index}`;
+        return { x: m.x + origin.x, y: m.y + origin.y, name, height: m.height };
+      });
+      outlineClosed = outlinePoints.length >= 3;
+      document.getElementById('measurements-container').innerHTML = '';
+      measurementPoints.forEach(p => {
+        addMeasurementInput(p.name, p);
+      });
+      drawCanvas();
+      updateAreaAndVolume();
+      updateJSON();
+    } catch (e) {
+      alert('Invalid JSON format.');
+    }
+  });
+
+  drawCanvas();
+</script>
+</body>
+</html>

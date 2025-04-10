@@ -1,0 +1,95 @@
+{
+  "gridScale": 100,
+  "origin": {
+    "x": 27,
+    "y": 27
+  },
+  "outlinePoints": [
+    {
+      "x": 27,
+      "y": 27
+    },
+    {
+      "x": 44,
+      "y": 27
+    },
+    {
+      "x": 44,
+      "y": 44
+    },
+    {
+      "x": 27,
+      "y": 44
+    }
+  ],
+  "measurementPoints": [
+    {
+      "id": "M0",
+      "x": 28,
+      "y": 28,
+      "height": 100
+    },
+    {
+      "id": "M1",
+      "x": 43,
+      "y": 28,
+      "height": 100
+    },
+    {
+      "id": "M2",
+      "x": 43,
+      "y": 43,
+      "height": 100
+    },
+    {
+      "id": "M3",
+      "x": 28,
+      "y": 43,
+      "height": 100
+    },
+    {
+      "id": "M4",
+      "x": 35,
+      "y": 34,
+      "height": 100
+    },
+    {
+      "id": "M5",
+      "x": 34,
+      "y": 33,
+      "height": 100
+    },
+    {
+      "id": "M6",
+      "x": 36,
+      "y": 33,
+      "height": 100
+    },
+    {
+      "id": "M7",
+      "x": 34,
+      "y": 35,
+      "height": 100
+    },
+    {
+      "id": "M8",
+      "x": 36,
+      "y": 35,
+      "height": 100
+    }
+  ],
+  "isOutlineClosed": true,
+  "nextMeasurementId": 9,
+  "interpolationMethod": "idw",
+  "activeVisualizations": [
+    "depthNumbers",
+    "heightMap",
+    "topographicMap"
+  ],
+  "contourInterval": 1,
+  "visualGridSize": 27.549227015633072,
+  "viewOffset": {
+    "x": -237.32139957842367,
+    "y": -529.183563934651
+  }
+}

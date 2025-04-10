@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Floor Leveling Calculator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background-color: #f4f4f9;
+    }
+
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+    }
+
+    canvas {
+      border: 2px solid #333;
+      margin: 20px auto;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    .data-display {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .measurement-point {
+      position: absolute;
+      transform: translate(-50%, -50%);
+    }
+
+    #measurements-section input {
+      margin-right: 10px;
+      width: 60px;
+    }
+  </style>
+</head>
+<body>
+<div class="controls">
+  <input type="number" id="grid-spacing" value="100" min="50" max="200"> mm grid spacing
+  <br><br>
+  <input type="radio" name="mode" value="select-origin" checked> Select Origin<br>
+  <input type="radio" name="mode" value="draw-outline"> Draw Outline<br>
+  <input type="radio" name="mode" value="select-measurements"> Select Measurements<br><br>
+  <select id="visualization">
+    <option value="none">None</option>
+    <option value="height-map">Height Map</option>
+    <option value="topographic">Topographic Map</option>
+  </select>
+</div>
+
+<canvas id="floor-canvas" width="600" height="600"></canvas>
+
+<div class="data-display">
+  Room Area: <span id="area-display">N/A</span> m²
+  <br>
+  Volume Needed: <span id="volume-display">N/A</span> L
+</div>
+
+<div id="measurements-section"></div>
+
+<button onclick="copyToClipboard()">Copy State to Clipboard</button>
+<textarea id="import-state" style="width:100%; height:100px; margin-top: 15px;"></textarea>
+<button onclick="importFromClipboard()">Import from Clipboard</button>
+
+<script>
+  const canvas = document.getElementById('floor-canvas');
+  const ctx = canvas.getContext('2d');
+  let gridSpacing = parseInt(document.getElementById('grid-spacing').value);
+  let mode = 'select-origin';
+  let currentMeasurementIndex;
+
+  // State variables
+  let origin, outline, measurements;
+
+  function init() {
+    origin = { x: 300, y: 300 };
+    outline = [];
+    measurements = [];
+
+    drawGrid();
+  }
+
+  function drawGrid() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const size = Math.min(canvas.width, canvas.height);
+    const cellsPerSide = size / gridSpacing;
+
+    // Draw vertical lines
+    for(let i = 0; i <= cellsPerSide; i++) {
+      ctx.beginPath();
+      ctx.moveTo(origin.x + (i * gridSpacing), origin.y);
+      ctx.lineTo(origin.x + (i * gridSpacing), origin.y + size);
+      ctx.stroke();
+    }
+
+    // Draw horizontal lines
+    for(let i = 0; i <= cellsPerSide; i++) {
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y + (i * gridSpacing));
+      ctx.lineTo(origin.x + size, origin.y + (i * gridSpacing));
+      ctx.stroke();
+    }
+
+    drawElements();
+  }
+
+  function drawElements() {
+    // Draw origin
+    if(mode === 'select-origin') {
+      ctx.beginPath();
+      ctx.arc(origin.x, origin.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#0f0';
+      ctx.fill();
+    }
+
+    // Draw outline and measurements
+    drawOutlineAndMeasurements();
+
+    // Visualize state
+    if(mode === 'select-measurements') {
+      measurements.forEach((measurement, index) => {
+        const el = document.createElement('div');
+        el.className = 'measurement-point';
+        el.style.left = measurement.x + 'px';
+        el.style.top = measurement.y + 'px';
+        el.innerHTML = `${index}: ${measurement.height}`;
+        el.setAttribute('data-index', index);
+        document.getElementById('measurements-section').appendChild(el);
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = measurement.height;
+        input.onchange = (e) => {
+          measurements[index].height = parseFloat(e.target.value);
+          drawElements();
+        };
+        document.getElementById('measurements-section').appendChild(input);
+      });
+    }
+  }
+
+  // Event listeners
+  canvas.addEventListener('click', handleCanvasClick);
+
+  function handleCanvasClick(e) {
+    const rect = e.target.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    switch(mode) {
+      case 'select-origin':
+        origin.x = Math.round(x / gridSpacing) * gridSpacing + (gridSpacing/2);
+        origin.y = Math.round(y / gridSpacing) * gridSpacing + (gridSpacing/2);
+        drawGrid();
+        break;
+
+      case 'draw-outline':
+        if(e.ctrlKey || e.metaKey) {
+          outline.pop();
+        } else {
+          const point = {
+            x: Math.round(x / gridSpacing) * gridSpacing,
+            y: Math.round(y / gridSpacing) * gridSpacing
+          };
+          if(point.x !== outline[outline.length - 1]?.x ||
+                  point.y !== outline[outline.length - 1]?.y) {
+            outline.push(point);
+          }
+        }
+        break;
+
+      case 'select-measurements':
+        const measurementPoint = findNearestMeasurement(x, y);
+        currentMeasurementIndex = measurementPoint ? measurements.indexOf(measurementPoint) : null;
+        break;
+    }
+
+    drawGrid();
+  }
+
+  // Utility functions
+  function findNearestMeasurement(x, y, radius = gridSpacing/2) {
+    return measurements.find(m =>
+            Math.abs(m.x - x) <= radius &&
+            Math.abs(m.y - y) <= radius
+    );
+  }
+
+  // Visualization and calculations
+  function drawOutlineAndMeasurements() {
+    if(outline.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(outline[0].x, outline[0].y);
+      for(let i = 1; i < outline.length; i++) {
+        ctx.lineTo(outline[i].x, outline[i].y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = '#f00';
+      ctx.stroke();
+
+      measurements.forEach(m => {
+        const x = m.x;
+        const y = m.y - (m.height * 10); // Scale height for visualization
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#f00';
+        ctx.fill();
+
+        ctx.textBaseline = 'top';
+        ctx.fillText(`${m.height}`, x-5, y);
+      });
+    }
+  }
+
+  function calculateArea() {
+    if(!outline.length) return 0;
+
+    let area = 0;
+    for(let i = 0; i < outline.length - 1; i++) {
+      const p1 = outline[i];
+      const p2 = outline[i+1];
+      area += (p1.x * p2.y - p2.x * p1.y) / 2;
+    }
+
+    // Convert to square meters
+    return Math.abs(area * (gridSpacing/100)) / 10000;
+  }
+
+  function calculateVolume() {
+    if(!outline.length || !measurements.length) return 0;
+
+    const area = calculateArea();
+    let totalHeightDifference = 0;
+
+    for(let i = 0; i < measurements.length - 1; i++) {
+      const h1 = measurements[i].height;
+      const h2 = measurements[i+1].height;
+      totalHeightDifference += Math.abs(h2 - h1);
+    }
+
+    return (area * totalHeightDifference) / 1000;
+  }
+
+  // Update displays
+  function updateDisplays() {
+    document.getElementById('area-display').textContent = calculateArea().toFixed(2);
+    document.getElementById('volume-display').textContent = calculateVolume().toFixed(2);
+  }
+
+  // Clipboard handling
+  function copyToClipboard() {
+    const state = JSON.stringify({
+      origin,
+      outline,
+      measurements,
+      gridSpacing
+    });
+    navigator.clipboard.writeText(state).then(() => console.log("Copied!"));
+  }
+
+  function importFromClipboard() {
+    navigator.clipboard.readText().then(text => {
+      const state = JSON.parse(text);
+      Object.assign(origin, state.origin);
+      outline = state.outline;
+      measurements = state.measurements;
+      gridSpacing = state.gridSpacing;
+
+      drawGrid();
+    });
+  }
+
+  // Initialize
+  document.getElementById('grid-spacing').value = gridSpacing;
+
+  updateDisplays();
+</script>
+</body>
+</html>

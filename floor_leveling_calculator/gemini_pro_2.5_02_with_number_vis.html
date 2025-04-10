@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Floor Leveling Calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      overscroll-behavior: none;
+      margin: 0;
+      overflow: hidden;
+      background-color: #f3f4f6;
+    }
+    canvas {
+      cursor: crosshair; /* Static crosshair cursor */
+      touch-action: none;
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
+    #controlsPanel {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      z-index: 10;
+      width: 24rem;
+      max-height: calc(100vh - 2rem);
+      overflow-y: auto;
+    }
+    #floatingInput {
+      position: absolute;
+      z-index: 100;
+      background-color: white;
+      border: 1px solid #ccc;
+      padding: 8px;
+      border-radius: 6px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      display: none;
+    }
+    #floatingInput input {
+      width: 60px;
+      padding: 4px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-right: 5px;
+      text-align: right;
+    }
+    button, .button-like {
+      padding: 8px 16px;
+      border-radius: 6px;
+      background-color: #3b82f6;
+      color: white;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button:hover, .button-like:hover {
+      background-color: #2563eb;
+    }
+    button:disabled {
+      background-color: #9ca3af;
+      cursor: not-allowed;
+    }
+    input[type="radio"] {
+      margin-right: 5px;
+    }
+    label {
+      margin-right: 15px;
+      cursor: pointer;
+    }
+    #jsonImportText {
+      width: 100%;
+      min-height: 100px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 8px;
+      font-family: monospace;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body class="bg-gray-100">
+
+<canvas id="floorCanvas"></canvas>
+
+<div id="controlsPanel" class="space-y-6 bg-white p-6 rounded-lg shadow-md">
+  <h1 class="text-2xl font-bold text-gray-800">Floor Leveling Calculator</h1>
+
+  <div>
+    <label for="gridSpacingInput" class="block text-sm font-medium text-gray-700">Grid Scale (mm per grid square):</label>
+    <input type="number" id="gridSpacingInput" value="100" min="1" step="1" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+    <p class="mt-1 text-xs text-gray-500">Defines the real-world size represented by each square on the visual grid.</p>
+  </div>
+
+  <div>
+    <span class="block text-sm font-medium text-gray-700 mb-2">Mode:</span>
+    <div class="flex flex-wrap gap-x-4 gap-y-2">
+      <label class="inline-flex items-center">
+        <input type="radio" name="mode" value="selectOrigin" checked class="form-radio h-4 w-4 text-indigo-600">
+        <span class="ml-2 text-gray-700">Select Origin</span>
+      </label>
+      <label class="inline-flex items-center">
+        <input type="radio" name="mode" value="drawOutline" class="form-radio h-4 w-4 text-indigo-600">
+        <span class="ml-2 text-gray-700">Draw Outline</span>
+      </label>
+      <label class="inline-flex items-center">
+        <input type="radio" name="mode" value="selectMeasurements" class="form-radio h-4 w-4 text-indigo-600">
+        <span class="ml-2 text-gray-700">Add/Edit Measurements</span>
+      </label>
+    </div>
+  </div>
+
+  <div>
+    <label for="visualizationSelect" class="block text-sm font-medium text-gray-700">Visualization:</label>
+    <select id="visualizationSelect" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+      <option value="none">None</option>
+      <option value="heightMap">Height Map</option>
+      <option value="topographicMap">Topographic Map</option>
+      <option value="depthNumbers">Depth Numbers</option> </select>
+  </div>
+
+  <div class="space-y-2 bg-gray-50 p-4 rounded-md border border-gray-200">
+    <h3 class="text-lg font-semibold text-gray-800">Results</h3>
+    <p class="text-sm text-gray-600">Cursor Coords: <span id="cursorCoords" class="font-mono">(0, 0)</span></p>
+    <p class="text-sm text-gray-600">Area: <span id="areaDisplay" class="font-mono">0.00</span> m²</p>
+    <p class="text-sm text-gray-600">Volume Needed: <span id="volumeDisplay" class="font-mono">0.00</span> liters</p>
+    <p class="text-xs text-gray-500 italic">(Volume calculated based on highest measurement point)</p>
+  </div>
+
+  <div class="space-y-3">
+    <h3 class="text-lg font-semibold text-gray-800">Data Management</h3>
+    <button id="exportJsonButton" class="w-full">Copy State to Clipboard (JSON)</button>
+    <div>
+      <button id="importJsonButton" class="w-full mb-2">Import State from JSON</button>
+      <textarea id="jsonImportText" placeholder="Paste JSON state here..."></textarea>
+    </div>
+    <button id="clearAllButton" class="w-full bg-red-500 hover:bg-red-600">Clear All Data</button>
+  </div>
+  <div class="space-y-2 bg-blue-50 p-4 rounded-md border border-blue-200">
+    <h3 class="text-lg font-semibold text-blue-800">Instructions</h3>
+    <ul class="list-disc list-inside text-sm text-blue-700 space-y-1">
+      <li>Set grid scale (mm per square).</li>
+      <li>Choose 'Select Origin' mode (➕ highlight) and click to place the green origin cross.</li>
+      <li>Choose 'Draw Outline' mode (⬜ highlight):
+        <ul>
+          <li>Click intersections to add blue square vertices and draw segments.</li>
+          <li>Click the first vertex again to close the outline.</li>
+          <li>Right-click a blue vertex square to delete it.</li>
+        </ul>
+      </li>
+      <li>Choose 'Add/Edit Measurements' mode (🔴 highlight):
+        <ul>
+          <li>Click an intersection to add a red measurement circle.</li>
+          <li>Click an existing red circle to edit its height.</li>
+          <li>Right-click a red circle to delete it.</li>
+          <li>Drag a red circle to move it.</li>
+        </ul>
+      </li>
+      <li>Use the dropdown to visualize heights (Height Map, Topographic, Depth Numbers).</li>
+      <li>Copy/Paste JSON to save/load your work.</li>
+    </ul>
+  </div>
+</div>
+
+<div id="floatingInput">
+  <input type="number" id="heightInput" step="1">
+  <span class="text-xs text-gray-500">mm</span>
+</div>
+
+<script>
+  // --- DOM Elements ---
+  const canvas = document.getElementById('floorCanvas');
+  const ctx = canvas.getContext('2d');
+  const controlsPanel = document.getElementById('controlsPanel');
+  const gridSpacingInput = document.getElementById('gridSpacingInput');
+  const modeRadios = document.querySelectorAll('input[name="mode"]');
+  const visualizationSelect = document.getElementById('visualizationSelect');
+  const cursorCoordsDisplay = document.getElementById('cursorCoords');
+  const areaDisplay = document.getElementById('areaDisplay');
+  const volumeDisplay = document.getElementById('volumeDisplay');
+  const exportJsonButton = document.getElementById('exportJsonButton');
+  const importJsonButton = document.getElementById('importJsonButton');
+  const jsonImportText = document.getElementById('jsonImportText');
+  const clearAllButton = document.getElementById('clearAllButton');
+  const floatingInputDiv = document.getElementById('floatingInput');
+  const heightInput = document.getElementById('heightInput');
+
+  // --- State Variables ---
+  let gridScale = parseInt(gridSpacingInput.value, 10) || 100;
+  let mode = 'selectOrigin';
+  let visualization = 'none'; // Added 'depthNumbers' as possibility
+  let origin = null;
+  let outlinePoints = [];
+  let measurementPoints = [];
+  let nextMeasurementId = 0;
+  let selectedMeasurementPoint = null;
+  let draggingPoint = null;
+  let dragStartCoords = null;
+  let isOutlineClosed = false;
+  let hoverGridPoint = null;
+  let canvasRect = null;
+  let lastMousePos = null;
+  let isMouseOverCanvas = false;
+
+  // --- Constants ---
+  const VISUAL_GRID_SIZE = 20;
+  const COLORS = {
+    grid: '#e0e0e0',
+    origin: '#10b981',
+    outline: '#3b82f6',
+    measurement: '#ef4444',
+    measurementLabel: '#ffffff',
+    selectionHighlight: '#eab308',
+    heightMapLow: [63, 131, 248],
+    heightMapHigh: [239, 68, 68],
+    contourLine: '#4b5563',
+    modeIndicatorOrigin: '#10b981',
+    modeIndicatorOutline: '#3b82f6',
+    modeIndicatorMeasurement: '#ef4444',
+    depthNumberText: 'rgba(0, 0, 0, 0.6)', // Semi-transparent black for depth numbers
+  };
+  const POINT_RADIUS = 5;
+  const SELECTION_RING_RADIUS = 10;
+  const PLACED_INDICATOR_SIZE = 5;
+  const HOVER_INDICATOR_SIZE = 6;
+  const CONTOUR_INTERVAL = 10;
+
+  // --- Utility Functions --- (No changes)
+  function canvasToGrid(canvasX, canvasY) { if (typeof canvasX !== 'number' || typeof canvasY !== 'number' || isNaN(canvasX) || isNaN(canvasY)) { return { x: 0, y: 0 }; } const gridX = Math.round(canvasX / VISUAL_GRID_SIZE); const gridY = Math.round(canvasY / VISUAL_GRID_SIZE); return { x: gridX, y: gridY }; }
+  function gridToCanvas(gridX, gridY) { const canvasX = gridX * VISUAL_GRID_SIZE; const canvasY = gridY * VISUAL_GRID_SIZE; return { x: canvasX, y: canvasY }; }
+  function gridToReal(gridX, gridY) { if (!origin) return { x: null, y: null }; const realX = (gridX - origin.x) * gridScale; const realY = (origin.y - gridY) * gridScale; return { x: realX, y: realY }; }
+  function getMousePos(evt) { if (!canvasRect) return { x: 0, y: 0, snappedX: 0, snappedY: 0 }; const clientX = evt.clientX; const clientY = evt.clientY; const canvasX = clientX - canvasRect.left; const canvasY = clientY - canvasRect.top; const snappedX = Math.round(canvasX / VISUAL_GRID_SIZE) * VISUAL_GRID_SIZE; const snappedY = Math.round(canvasY / VISUAL_GRID_SIZE) * VISUAL_GRID_SIZE; return { x: canvasX, y: canvasY, snappedX: snappedX, snappedY: snappedY }; }
+  function findPointNear(canvasX, canvasY, pointArray, threshold = PLACED_INDICATOR_SIZE * 1.5) { for (let i = pointArray.length - 1; i >= 0; i--) { const point = pointArray[i]; const pointCanvas = gridToCanvas(point.x, point.y); const dx = canvasX - pointCanvas.x; const dy = canvasY - pointCanvas.y; if (Math.sqrt(dx * dx + dy * dy) < threshold) { return { point, index: i }; } } return null; }
+  function findOutlineVertexNear(canvasX, canvasY, threshold = PLACED_INDICATOR_SIZE * 1.5) { for (let i = outlinePoints.length - 1; i >= 0; i--) { const point = outlinePoints[i]; const pointCanvas = gridToCanvas(point.x, point.y); const dx = canvasX - pointCanvas.x; const dy = canvasY - pointCanvas.y; if (Math.sqrt(dx * dx + dy * dy) < threshold) { return { point, index: i }; } } return null; }
+
+  // --- Drawing Functions ---
+
+  function drawGrid() { ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 0.5; ctx.beginPath(); for (let x = 0; x <= canvas.width; x += VISUAL_GRID_SIZE) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); } for (let y = 0; y <= canvas.height; y += VISUAL_GRID_SIZE) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); } ctx.stroke(); }
+  function drawOrigin() { if (origin) { const originCanvas = gridToCanvas(origin.x, origin.y); if (originCanvas.x >= 0 && originCanvas.x <= canvas.width && originCanvas.y >= 0 && originCanvas.y <= canvas.height) { const x = originCanvas.x; const y = originCanvas.y; const size = PLACED_INDICATOR_SIZE; ctx.strokeStyle = COLORS.origin; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x - size, y); ctx.lineTo(x + size, y); ctx.moveTo(x, y - size); ctx.lineTo(x, y + size); ctx.stroke(); ctx.lineWidth = 1; ctx.fillStyle = 'black'; ctx.font = '10px Inter'; ctx.fillText('(0,0)', x + size + 2 , y + size + 2); } } }
+  function drawOutline() { if (outlinePoints.length < 1) return; ctx.strokeStyle = COLORS.outline; ctx.lineWidth = 2; ctx.beginPath(); const startCanvas = gridToCanvas(outlinePoints[0].x, outlinePoints[0].y); ctx.moveTo(startCanvas.x, startCanvas.y); for (let i = 1; i < outlinePoints.length; i++) { const pointCanvas = gridToCanvas(outlinePoints[i].x, outlinePoints[i].y); ctx.lineTo(pointCanvas.x, pointCanvas.y); } if (isOutlineClosed && outlinePoints.length > 1) { ctx.lineTo(startCanvas.x, startCanvas.y); } ctx.stroke(); ctx.fillStyle = COLORS.outline; const size = PLACED_INDICATOR_SIZE; for (let i = 0; i < outlinePoints.length; i++) { const pointCanvas = gridToCanvas(outlinePoints[i].x, outlinePoints[i].y); ctx.fillRect(pointCanvas.x - size, pointCanvas.y - size, size * 2, size * 2); } }
+  function drawMeasurementPoints() { measurementPoints.forEach(point => { const pointCanvas = gridToCanvas(point.x, point.y); if (pointCanvas.x >= -SELECTION_RING_RADIUS && pointCanvas.x <= canvas.width + SELECTION_RING_RADIUS && pointCanvas.y >= -SELECTION_RING_RADIUS && pointCanvas.y <= canvas.height + SELECTION_RING_RADIUS) { if (selectedMeasurementPoint && selectedMeasurementPoint.id === point.id) { ctx.strokeStyle = COLORS.selectionHighlight; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(pointCanvas.x, pointCanvas.y, SELECTION_RING_RADIUS, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1; } ctx.fillStyle = COLORS.measurement; ctx.beginPath(); ctx.arc(pointCanvas.x, pointCanvas.y, PLACED_INDICATOR_SIZE, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'black'; ctx.font = '10px Inter'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; const label = `${point.id}: ${point.height === undefined ? '?' : point.height + 'mm'}`; ctx.fillText(label, pointCanvas.x + PLACED_INDICATOR_SIZE + 2, pointCanvas.y - PLACED_INDICATOR_SIZE - 2); } }); }
+  function drawHoverHighlight() { if (hoverGridPoint && !draggingPoint && isMouseOverCanvas) { const existingMeasurement = measurementPoints.find(p => p.x === hoverGridPoint.x && p.y === hoverGridPoint.y); if (existingMeasurement && (!selectedMeasurementPoint || selectedMeasurementPoint.id !== existingMeasurement.id)) { return; } const hoverCanvas = gridToCanvas(hoverGridPoint.x, hoverGridPoint.y); if (hoverCanvas.x >= -HOVER_INDICATOR_SIZE && hoverCanvas.x <= canvas.width + HOVER_INDICATOR_SIZE && hoverCanvas.y >= -HOVER_INDICATOR_SIZE && hoverCanvas.y <= canvas.height + HOVER_INDICATOR_SIZE) { const x = hoverCanvas.x; const y = hoverCanvas.y; const size = HOVER_INDICATOR_SIZE; ctx.lineWidth = 2; switch (mode) { case 'selectOrigin': ctx.strokeStyle = COLORS.modeIndicatorOrigin; ctx.beginPath(); ctx.moveTo(x - size, y); ctx.lineTo(x + size, y); ctx.moveTo(x, y - size); ctx.lineTo(x, y + size); ctx.stroke(); break; case 'drawOutline': ctx.strokeStyle = COLORS.modeIndicatorOutline; ctx.strokeRect(x - size, y - size, size * 2, size * 2); break; case 'selectMeasurements': ctx.strokeStyle = COLORS.modeIndicatorMeasurement; ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.stroke(); break; } ctx.lineWidth = 1; } } }
+
+  // --- Visualization Functions ---
+
+  function findNearestMeasurementPoint(gridX, gridY) { if (measurementPoints.length === 0) return null; let nearestPoint = null; let minDistanceSq = Infinity; measurementPoints.forEach(point => { if (point.height === undefined || point.height === null) return; const dx = point.x - gridX; const dy = point.y - gridY; const distanceSq = dx * dx + dy * dy; if (distanceSq < minDistanceSq) { minDistanceSq = distanceSq; nearestPoint = point; } }); return nearestPoint; }
+  function drawHeightMap() { if (measurementPoints.length === 0 || !isOutlineClosed) return; const validPoints = measurementPoints.filter(p => p.height !== undefined && p.height !== null); if (validPoints.length === 0) return; const heights = validPoints.map(p => p.height); const minHeight = Math.min(...heights); const maxHeight = Math.max(...heights); const heightRange = maxHeight - minHeight; const imageData = ctx.createImageData(canvas.width, canvas.height); const data = imageData.data; const gridOutlinePoints = outlinePoints.map(p => ({ x: p.x, y: p.y })); const maxGridX = Math.ceil(canvas.width / VISUAL_GRID_SIZE); const maxGridY = Math.ceil(canvas.height / VISUAL_GRID_SIZE); for (let gy = 0; gy < maxGridY; gy++) { for (let gx = 0; gx < maxGridX; gx++) { if (isPointInPolygon(gx + 0.5, gy + 0.5, gridOutlinePoints)) { const nearestPoint = findNearestMeasurementPoint(gx, gy); if (nearestPoint) { const height = nearestPoint.height; let ratio = heightRange > 0 ? (height - minHeight) / heightRange : 0.5; ratio = Math.max(0, Math.min(1, ratio)); const r = Math.round(COLORS.heightMapLow[0] + (COLORS.heightMapHigh[0] - COLORS.heightMapLow[0]) * ratio); const g = Math.round(COLORS.heightMapLow[1] + (COLORS.heightMapHigh[1] - COLORS.heightMapLow[1]) * ratio); const b = Math.round(COLORS.heightMapLow[2] + (COLORS.heightMapHigh[2] - COLORS.heightMapLow[2]) * ratio); const startPixelY = gy * VISUAL_GRID_SIZE; const endPixelY = Math.min(startPixelY + VISUAL_GRID_SIZE, canvas.height); const startPixelX = gx * VISUAL_GRID_SIZE; const endPixelX = Math.min(startPixelX + VISUAL_GRID_SIZE, canvas.width); for (let py = Math.floor(startPixelY); py < Math.floor(endPixelY); py++) { for (let px = Math.floor(startPixelX); px < Math.floor(endPixelX); px++) { const index = (py * canvas.width + px) * 4; data[index] = r; data[index + 1] = g; data[index + 2] = b; data[index + 3] = 150; } } } } } } const currentSmoothing = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false; ctx.putImageData(imageData, 0, 0); ctx.imageSmoothingEnabled = currentSmoothing; }
+  function drawTopographicMap() { if (measurementPoints.length < 2 || !isOutlineClosed) return; const validPoints = measurementPoints.filter(p => p.height !== undefined && p.height !== null); if (validPoints.length < 2) return; const heights = validPoints.map(p => p.height); const minHeight = Math.min(...heights); const maxHeight = Math.max(...heights); ctx.strokeStyle = COLORS.contourLine; ctx.lineWidth = 1; ctx.font = '8px Inter'; ctx.fillStyle = COLORS.contourLine; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const gridOutlinePoints = outlinePoints.map(p => ({ x: p.x, y: p.y })); const maxGridX = Math.ceil(canvas.width / VISUAL_GRID_SIZE); const maxGridY = Math.ceil(canvas.height / VISUAL_GRID_SIZE); for (let level = Math.ceil(minHeight / CONTOUR_INTERVAL) * CONTOUR_INTERVAL; level <= maxHeight; level += CONTOUR_INTERVAL) { ctx.beginPath(); let lastPoint = null; for (let gy = 0; gy < maxGridY; gy++) { for (let gx = 0; gx < maxGridX; gx++) { const p1 = findNearestMeasurementPoint(gx, gy); const p2 = findNearestMeasurementPoint(gx + 1, gy); if (p1 && p2 && p1.height !== undefined && p2.height !== undefined && p1.height !== p2.height) { if ((p1.height >= level && p2.height < level) || (p1.height < level && p2.height >= level)) { const ratio = (level - p1.height) / (p2.height - p1.height); const intersectX = gx + ratio; const intersectY = gy; if (isPointInPolygon(intersectX, intersectY, gridOutlinePoints)) { const canvasPos = gridToCanvas(intersectX, intersectY); if (lastPoint && Math.abs(lastPoint.x - canvasPos.x) < VISUAL_GRID_SIZE * 1.5 && Math.abs(lastPoint.y - canvasPos.y) < VISUAL_GRID_SIZE * 1.5) ctx.lineTo(canvasPos.x, canvasPos.y); else ctx.moveTo(canvasPos.x, canvasPos.y); lastPoint = canvasPos; } } } const p3 = findNearestMeasurementPoint(gx, gy + 1); if (p1 && p3 && p1.height !== undefined && p3.height !== undefined && p1.height !== p3.height) { if ((p1.height >= level && p3.height < level) || (p1.height < level && p3.height >= level)) { const ratio = (level - p1.height) / (p3.height - p1.height); const intersectX = gx; const intersectY = gy + ratio; if (isPointInPolygon(intersectX, intersectY, gridOutlinePoints)) { const canvasPos = gridToCanvas(intersectX, intersectY); if (lastPoint && Math.abs(lastPoint.x - canvasPos.x) < VISUAL_GRID_SIZE * 1.5 && Math.abs(lastPoint.y - canvasPos.y) < VISUAL_GRID_SIZE * 1.5) ctx.lineTo(canvasPos.x, canvasPos.y); else ctx.moveTo(canvasPos.x, canvasPos.y); lastPoint = canvasPos; } } } } } ctx.stroke(); } }
+
+  // New: Function to draw depth numbers visualization
+  function drawDepthNumbers() {
+    if (measurementPoints.length === 0 || !isOutlineClosed) return;
+    const validPoints = measurementPoints.filter(p => p.height !== undefined && p.height !== null);
+    if (validPoints.length === 0) return;
+
+    const heights = validPoints.map(p => p.height);
+    const maxHeight = Math.max(...heights);
+    const gridOutlinePoints = outlinePoints.map(p => ({ x: p.x, y: p.y }));
+
+    // Setup text style
+    const fontSize = Math.max(8, Math.floor(VISUAL_GRID_SIZE / 2.5)); // Dynamic font size
+    ctx.font = `${fontSize}px Inter`;
+    ctx.fillStyle = COLORS.depthNumberText; // Semi-transparent black
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const maxGridX = Math.ceil(canvas.width / VISUAL_GRID_SIZE);
+    const maxGridY = Math.ceil(canvas.height / VISUAL_GRID_SIZE);
+
+    for (let gy = 0; gy < maxGridY; gy++) {
+      for (let gx = 0; gx < maxGridX; gx++) {
+        // Check if the center of the grid cell is inside the polygon
+        if (isPointInPolygon(gx + 0.5, gy + 0.5, gridOutlinePoints)) {
+          const nearestPoint = findNearestMeasurementPoint(gx, gy);
+          if (nearestPoint && nearestPoint.height !== undefined) {
+            const cellHeight = nearestPoint.height;
+            const depth = maxHeight - cellHeight;
+
+            if (depth > 0) {
+              const roundedDepth = Math.round(depth);
+              // Calculate center of the cell in canvas coordinates
+              const cellCenterX = (gx + 0.5) * VISUAL_GRID_SIZE;
+              const cellCenterY = (gy + 0.5) * VISUAL_GRID_SIZE;
+
+              // Draw the number if it fits (basic check)
+              if (fontSize < VISUAL_GRID_SIZE * 0.8) { // Ensure font isn't too big for cell
+                ctx.fillText(roundedDepth.toString(), cellCenterX, cellCenterY);
+              }
+            }
+            // else: depth is 0 or negative, draw nothing
+          }
+          // else: no nearest point found inside, draw nothing
+        }
+      }
+    }
+  }
+
+  // --- Calculation Functions --- (No changes)
+  function calculateArea() { if (!isOutlineClosed || outlinePoints.length < 3) return 0; let area = 0; for (let i = 0; i < outlinePoints.length; i++) { const p1 = outlinePoints[i]; const p2 = outlinePoints[(i + 1) % outlinePoints.length]; area += (p1.x * p2.y - p2.x * p1.y); } const gridArea = Math.abs(area) / 2; const realArea = gridArea * (gridScale / 1000) * (gridScale / 1000); return realArea; }
+  function isPointInPolygon(gridX, gridY, polygonPoints) { let isInside = false; for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) { const xi = polygonPoints[i].x, yi = polygonPoints[i].y; const xj = polygonPoints[j].x, yj = polygonPoints[j].y; const intersect = ((yi > gridY) !== (yj > gridY)) && (gridX < (xj - xi) * (gridY - yi) / (yj - yi) + xi); if (intersect) isInside = !isInside; } return isInside; }
+  function calculateVolume() { if (!isOutlineClosed || measurementPoints.length === 0) return 0; const validPoints = measurementPoints.filter(p => p.height !== undefined && p.height !== null); if (validPoints.length === 0) return 0; const heights = validPoints.map(p => p.height); const maxHeight = Math.max(...heights); let totalVolumeMM3 = 0; const cellAreaMM2 = gridScale * gridScale; const gridOutlinePoints = outlinePoints.map(p => ({ x: p.x, y: p.y })); const maxGridX = Math.ceil(canvas.width / VISUAL_GRID_SIZE); const maxGridY = Math.ceil(canvas.height / VISUAL_GRID_SIZE); for (let gy = 0; gy < maxGridY; gy++) { for (let gx = 0; gx < maxGridX; gx++) { if (isPointInPolygon(gx + 0.5, gy + 0.5, gridOutlinePoints)) { const nearestPoint = findNearestMeasurementPoint(gx, gy); if (nearestPoint && nearestPoint.height !== undefined) { const cellHeight = nearestPoint.height; const heightDifference = maxHeight - cellHeight; if (heightDifference > 0) { totalVolumeMM3 += heightDifference * cellAreaMM2; } } else { totalVolumeMM3 += maxHeight * cellAreaMM2; } } } } const totalVolumeLiters = totalVolumeMM3 / 1000000; return totalVolumeLiters; }
+
+  // --- Update and Redraw ---
+
+  function updateCalculations() { const area = calculateArea(); const volume = calculateVolume(); areaDisplay.textContent = area.toFixed(2); volumeDisplay.textContent = volume.toFixed(2); }
+
+  // Modified redrawCanvas to include depthNumbers
+  function redrawCanvas() {
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw visualizations first (underneath grid/points)
+    if (isOutlineClosed && measurementPoints.length > 0) {
+      if (visualization === 'heightMap') drawHeightMap();
+      else if (visualization === 'topographicMap') drawTopographicMap();
+      else if (visualization === 'depthNumbers') drawDepthNumbers(); // Call new function
+    }
+
+    // Draw main elements
+    drawGrid();
+    drawOrigin();
+    drawOutline();
+    drawMeasurementPoints();
+    drawHoverHighlight(); // Draws mode graphic at hover point
+  }
+
+  // --- Floating Input Logic --- (No changes)
+  function showFloatingInput(canvasX, canvasY, point = null) { selectedMeasurementPoint = point; heightInput.value = (point && point.height !== undefined) ? point.height : ''; const inputX = canvasRect.left + canvasX + 10; const inputY = canvasRect.top + canvasY + 10; floatingInputDiv.style.left = `${inputX}px`; floatingInputDiv.style.top = `${inputY}px`; floatingInputDiv.style.display = 'block'; heightInput.focus(); heightInput.select(); redrawCanvas(); }
+  function hideFloatingInput() { if (floatingInputDiv.style.display !== 'none') { if (selectedMeasurementPoint) { const newHeight = parseInt(heightInput.value, 10); if (!isNaN(newHeight)) selectedMeasurementPoint.height = newHeight; else if (heightInput.value.trim() === '') selectedMeasurementPoint.height = undefined; updateCalculations(); } selectedMeasurementPoint = null; floatingInputDiv.style.display = 'none'; redrawCanvas(); } }
+  function handleFloatingInputKey(event) { if (event.key === 'Enter') { event.preventDefault(); hideFloatingInput(); } else if (event.key === 'Escape') { selectedMeasurementPoint = null; floatingInputDiv.style.display = 'none'; redrawCanvas(); } }
+
+  // --- Event Handlers --- (No changes except clearAllButton fix verified)
+  gridSpacingInput.addEventListener('change', () => { const newScale = parseInt(gridSpacingInput.value, 10); if (newScale >= 1) { gridScale = newScale; updateCalculations(); if (origin && hoverGridPoint) { const realCoords = gridToReal(hoverGridPoint.x, hoverGridPoint.y); cursorCoordsDisplay.textContent = `(${realCoords.x}, ${realCoords.y}) mm`; } else if (origin) { cursorCoordsDisplay.textContent = `(Hover over grid)`; } } else { gridSpacingInput.value = gridScale; } });
+  modeRadios.forEach(radio => { radio.addEventListener('change', (e) => { mode = e.target.value; selectedMeasurementPoint = null; hideFloatingInput(); hoverGridPoint = null; redrawCanvas(); }); });
+  visualizationSelect.addEventListener('change', (e) => { visualization = e.target.value; redrawCanvas(); });
+  window.addEventListener('mousemove', (e) => { if (!canvas) return; const pos = getMousePos(e); lastMousePos = { x: pos.x, y: pos.y }; if (draggingPoint) { const currentGridPos = canvasToGrid(pos.snappedX, pos.snappedY); if (currentGridPos && (currentGridPos.x !== draggingPoint.x || currentGridPos.y !== draggingPoint.y)) { draggingPoint.x = currentGridPos.x; draggingPoint.y = currentGridPos.y; updateCalculations(); } const realCoords = gridToReal(currentGridPos.x, currentGridPos.y); cursorCoordsDisplay.textContent = origin ? `(${realCoords.x}, ${realCoords.y}) mm` : `(Origin not set)`; canvas.style.cursor = 'grabbing'; redrawCanvas(); return; } else { canvas.style.cursor = 'crosshair'; } isMouseOverCanvas = (e.target === canvas); if (isMouseOverCanvas) { const gridCoords = canvasToGrid(pos.snappedX, pos.snappedY); const realCoords = gridToReal(gridCoords.x, gridCoords.y); cursorCoordsDisplay.textContent = origin ? `(${realCoords.x}, ${realCoords.y}) mm` : `(Origin not set)`; const currentHoverGridPoint = gridCoords; if (!hoverGridPoint || hoverGridPoint.x !== currentHoverGridPoint.x || hoverGridPoint.y !== currentHoverGridPoint.y) { hoverGridPoint = currentHoverGridPoint; } } else { hoverGridPoint = null; cursorCoordsDisplay.textContent = origin ? `(Off Canvas)` : `(Origin not set)`; } redrawCanvas(); });
+  canvas.addEventListener('mouseleave', () => { isMouseOverCanvas = false; hoverGridPoint = null; lastMousePos = null; redrawCanvas(); });
+  canvas.addEventListener('mouseenter', (e) => { isMouseOverCanvas = true; });
+  canvas.addEventListener('mousedown', (e) => { if (e.button !== 0) return; if (mode === 'selectMeasurements') { const pos = getMousePos(e); const clickedPointData = findPointNear(pos.x, pos.y, measurementPoints); if (clickedPointData) { draggingPoint = clickedPointData.point; dragStartCoords = { x: pos.x, y: pos.y }; hideFloatingInput(); selectedMeasurementPoint = null; redrawCanvas(); canvas.style.cursor = 'grabbing'; } } });
+  window.addEventListener('mouseup', (e) => { if (e.button !== 0) return; if (draggingPoint) { const pos = getMousePos(e); const finalGridPos = canvasToGrid(pos.snappedX, pos.snappedY); if (finalGridPos) { draggingPoint.x = finalGridPos.x; draggingPoint.y = finalGridPos.y; } draggingPoint = null; dragStartCoords = null; updateCalculations(); canvas.style.cursor = 'crosshair'; redrawCanvas(); } });
+  canvas.addEventListener('click', (e) => { const pos = getMousePos(e); const gridCoords = canvasToGrid(pos.snappedX, pos.snappedY); if (!gridCoords || typeof gridCoords.x !== 'number' || typeof gridCoords.y !== 'number') return; if (dragStartCoords && (Math.abs(pos.x - dragStartCoords.x) > 5 || Math.abs(pos.y - dragStartCoords.y) > 5)) return; const clickedPointData = findPointNear(pos.x, pos.y, measurementPoints); if (floatingInputDiv.style.display === 'block' && (!clickedPointData || !selectedMeasurementPoint || clickedPointData.point.id !== selectedMeasurementPoint.id)) { hideFloatingInput(); } if (mode === 'selectOrigin') { origin = gridCoords; updateCalculations(); redrawCanvas(); } else if (mode === 'drawOutline') { if (!isOutlineClosed) { if (outlinePoints.length >= 3) { const startPoint = outlinePoints[0]; if (gridCoords.x === startPoint.x && gridCoords.y === startPoint.y) { isOutlineClosed = true; updateCalculations(); redrawCanvas(); return; } } const lastPoint = outlinePoints[outlinePoints.length - 1]; if (!lastPoint || lastPoint.x !== gridCoords.x || lastPoint.y !== gridCoords.y) { outlinePoints.push(gridCoords); if (outlinePoints.length === 3) { const startPoint = outlinePoints[0]; if (gridCoords.x === startPoint.x && gridCoords.y === startPoint.y) { isOutlineClosed = true; outlinePoints.pop(); } } updateCalculations(); redrawCanvas(); } } else { console.log("Outline already closed."); } } else if (mode === 'selectMeasurements') { if (clickedPointData) { showFloatingInput(pos.snappedX, pos.snappedY, clickedPointData.point); } else { const newPoint = { id: `M${nextMeasurementId++}`, x: gridCoords.x, y: gridCoords.y, height: undefined }; measurementPoints.push(newPoint); showFloatingInput(pos.snappedX, pos.snappedY, newPoint); } } });
+  canvas.addEventListener('contextmenu', (e) => { e.preventDefault(); const pos = getMousePos(e); if (mode === 'selectMeasurements') { const clickedMeasurementData = findPointNear(pos.x, pos.y, measurementPoints); if (clickedMeasurementData) { if (selectedMeasurementPoint && selectedMeasurementPoint.id === clickedMeasurementData.point.id) hideFloatingInput(); measurementPoints.splice(clickedMeasurementData.index, 1); updateCalculations(); redrawCanvas(); return; } } else if (mode === 'drawOutline') { const clickedVertexData = findOutlineVertexNear(pos.x, pos.y); if (clickedVertexData) { outlinePoints.splice(clickedVertexData.index, 1); if (outlinePoints.length < 3 || isOutlineClosed) { isOutlineClosed = false; } updateCalculations(); redrawCanvas(); return; } } });
+  document.addEventListener('click', (e) => { if (floatingInputDiv.style.display === 'block') { if (!canvas.contains(e.target) && !floatingInputDiv.contains(e.target) && !controlsPanel.contains(e.target)) hideFloatingInput(); } });
+  heightInput.addEventListener('keydown', handleFloatingInputKey);
+  function getStateAsJson() { const state = { gridScale: gridScale, origin: origin, outlinePoints: outlinePoints, measurementPoints: measurementPoints, isOutlineClosed: isOutlineClosed, nextMeasurementId: nextMeasurementId, }; return JSON.stringify(state, null, 2); }
+  function loadStateFromJson(jsonString) { try { const state = JSON.parse(jsonString); if (!state || typeof state !== 'object') throw new Error("Invalid JSON data."); if (typeof state.gridScale !== 'number' || !Array.isArray(state.outlinePoints) || !Array.isArray(state.measurementPoints)) throw new Error("Missing or invalid core state properties."); gridScale = state.gridScale; origin = state.origin || null; outlinePoints = state.outlinePoints; measurementPoints = state.measurementPoints; isOutlineClosed = state.isOutlineClosed || false; nextMeasurementId = state.nextMeasurementId || (measurementPoints.length > 0 ? Math.max(...measurementPoints.map(p => parseInt(p.id.substring(1), 10))) + 1 : 0); gridSpacingInput.value = gridScale; modeRadios.forEach(r => r.checked = (r.value === 'selectOrigin')); mode = 'selectOrigin'; visualizationSelect.value = 'none'; visualization = 'none'; selectedMeasurementPoint = null; draggingPoint = null; hoverGridPoint = null; hideFloatingInput(); resizeCanvas(); jsonImportText.value = ''; alert("State imported successfully!"); } catch (error) { console.error("Failed to import state:", error); alert(`Error importing state: ${error.message}`); } }
+  exportJsonButton.addEventListener('click', () => { const jsonState = getStateAsJson(); navigator.clipboard.writeText(jsonState).then(() => alert('State copied to clipboard!')).catch(err => { console.error('Failed to copy state: ', err); alert('Error copying state. See console.'); }); });
+  importJsonButton.addEventListener('click', () => { const jsonString = jsonImportText.value.trim(); if (jsonString) loadStateFromJson(jsonString); else alert('Please paste JSON state into the text area first.'); });
+  clearAllButton.addEventListener('click', () => { if (confirm("Are you sure you want to clear all data?")) { gridScale = 100; origin = null; outlinePoints = []; measurementPoints = []; nextMeasurementId = 0; selectedMeasurementPoint = null; draggingPoint = null; isOutlineClosed = false; hoverGridPoint = null; lastMousePos = null; isMouseOverCanvas = false; gridSpacingInput.value = gridScale; modeRadios.forEach(r => r.checked = (r.value === 'selectOrigin')); mode = 'selectOrigin'; visualizationSelect.value = 'none'; visualization = 'none'; jsonImportText.value = ''; hideFloatingInput(); updateCalculations(); redrawCanvas(); cursorCoordsDisplay.textContent = '(Origin not set)'; } });
+
+  // --- Initial Setup & Resize ---
+  function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; canvasRect = canvas.getBoundingClientRect(); redrawCanvas(); updateCalculations(); }
+  resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+
+</script>
+
+</body>
+</html>

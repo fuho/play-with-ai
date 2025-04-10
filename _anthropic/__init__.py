@@ -1,6 +1,6 @@
 from anthropic import Anthropic
 
-API_KEY = "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"
+API_KEY = None
 
 client = Anthropic(
     api_key=API_KEY,
